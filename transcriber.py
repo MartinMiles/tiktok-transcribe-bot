@@ -1,5 +1,5 @@
 """
-TikTok video transcription using yt-dlp (audio download) + OpenAI Whisper (speech-to-text).
+TikTok video transcription using yt-dlp (audio download) + Groq Whisper API (speech-to-text).
 """
 
 import asyncio
@@ -8,36 +8,26 @@ import os
 import re
 import tempfile
 
-import whisper
+import httpx
 
 logger = logging.getLogger(__name__)
 
 _SENTENCES_PER_PARAGRAPH = 4
 
-# Whisper model: "base" is ~140 MB, good balance of speed and accuracy.
-# Options: tiny, base, small, medium, large
-_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
-
-_model = None
-
-
-def _get_model():
-    """Lazy-load the Whisper model (downloads on first use)."""
-    global _model
-    if _model is None:
-        logger.info("Loading Whisper '%s' model...", _WHISPER_MODEL)
-        _model = whisper.load_model(_WHISPER_MODEL)
-        logger.info("Whisper model loaded.")
-    return _model
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 
 async def get_transcript(tiktok_url: str, timeout_ms: int = 120_000) -> str:
     """
-    Download audio from *tiktok_url* via yt-dlp, transcribe with Whisper,
+    Download audio from *tiktok_url* via yt-dlp, transcribe via Groq Whisper API,
     and return cleaned paragraph text.
 
     Raises ``RuntimeError`` on any failure.
     """
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY not set in environment variables")
+
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio.mp3")
 
@@ -48,14 +38,12 @@ async def get_transcript(tiktok_url: str, timeout_ms: int = 120_000) -> str:
         if not os.path.exists(audio_path):
             raise RuntimeError("yt-dlp did not produce an audio file")
 
-        # 2. Transcribe with Whisper (CPU-bound, run in thread)
-        logger.info("Transcribing with Whisper...")
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _transcribe, audio_path)
+        # 2. Transcribe via Groq API
+        logger.info("Sending to Groq Whisper API...")
+        raw_text = await _transcribe_groq(audio_path, timeout_ms)
 
-    raw_text = result["text"].strip()
     if not raw_text:
-        raise RuntimeError("Whisper returned empty transcription")
+        raise RuntimeError("Groq returned empty transcription")
 
     logger.info("Transcription complete (%d chars)", len(raw_text))
     return _format_transcript(raw_text)
@@ -95,10 +83,25 @@ def _run_ytdlp(url: str, opts: dict) -> None:
         ydl.download([url])
 
 
-def _transcribe(audio_path: str) -> dict:
-    """Run Whisper inference on an audio file."""
-    model = _get_model()
-    return model.transcribe(audio_path)
+async def _transcribe_groq(audio_path: str, timeout_ms: int) -> str:
+    """Send audio to Groq's Whisper API and return the transcript text."""
+    async with httpx.AsyncClient() as client:
+        with open(audio_path, "rb") as f:
+            resp = await client.post(
+                GROQ_TRANSCRIBE_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                files={"file": ("audio.mp3", f, "audio/mpeg")},
+                data={
+                    "model": "whisper-large-v3",
+                    "response_format": "text",
+                },
+                timeout=timeout_ms / 1000,
+            )
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"Groq API error {resp.status_code}: {resp.text[:300]}")
+
+    return resp.text.strip()
 
 
 def _format_transcript(raw: str) -> str:
