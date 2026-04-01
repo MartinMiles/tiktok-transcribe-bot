@@ -1,0 +1,4 @@
+python-telegram-bot==21.10
+yt-dlp>=2025.12.8
+openai-whisper>=20250625
+python-dotenv==1.0.1
