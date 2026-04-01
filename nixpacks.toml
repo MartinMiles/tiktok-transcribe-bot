@@ -1,6 +1,0 @@
-[phases.setup]
-nixPkgs = ["ffmpeg-full"]
-aptPkgs = ["ffmpeg"]
-
-[start]
-cmd = "python bot.py"
