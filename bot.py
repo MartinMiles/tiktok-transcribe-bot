@@ -80,7 +80,7 @@ async def _process_url(update: Update, url: str) -> None:
         return
     except Exception as exc:
         logger.exception("Unexpected error for %s", url)
-        await status.edit_text("An unexpected error occurred. Please try again later.")
+        await status.edit_text(f"Unexpected error: {type(exc).__name__}: {exc}")
         return
 
     # Send transcript, splitting if it exceeds Telegram's limit
