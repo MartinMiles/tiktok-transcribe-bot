@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 
 _SENTENCES_PER_PARAGRAPH = 4
 
+# TikTok can label silent H.265 variants as AAC. Prefer H.264 video with
+# its own audio over those variants or a separate music/soundtrack asset.
+_AUDIO_FORMAT = (
+    "best[vcodec~='^(avc|h264)'][acodec!=none]/"
+    "best[acodec!=none]/bestaudio"
+)
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
@@ -54,7 +61,7 @@ async def _download_audio(url: str, output_path: str, timeout_ms: int) -> None:
     import yt_dlp
 
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": _AUDIO_FORMAT,
         "outtmpl": output_path.replace(".mp3", ".%(ext)s"),
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
@@ -75,6 +82,13 @@ async def _download_audio(url: str, output_path: str, timeout_ms: int) -> None:
         )
     except asyncio.TimeoutError:
         raise RuntimeError(f"yt-dlp timed out after {timeout_ms / 1000:.0f}s")
+    except yt_dlp.utils.DownloadError as exc:
+        if "unable to obtain file audio codec" in str(exc):
+            raise RuntimeError(
+                "Audio could not be read from the downloaded TikTok file. "
+                "The file may have no audio track or may be unreadable by ffprobe."
+            ) from exc
+        raise RuntimeError("TikTok download or audio conversion failed.") from exc
 
 
 def _run_ytdlp(url: str, opts: dict) -> None:

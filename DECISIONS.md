@@ -178,6 +178,32 @@ The regex `https?://(?:www\.|vm\.|vt\.)?tiktok\.com/\S+` matches all of these. U
 
 ## Potential Future Issues
 
+### Audio selection fix (2026-10-26)
+
+Reported symptom: `Postprocessing: WARNING: unable to obtain file audio codec with ffprobe`.
+TikTok can advertise AAC audio on H.265 variants that contain no audio stream;
+see [yt-dlp issue #15642](https://github.com/yt-dlp/yt-dlp/issues/15642).
+This is a likely explanation for the reported failure, not confirmation about
+the specific live video or deployment.
+
+The downloader now prefers H.264/AVC video with audio, then other combined
+video/audio formats, then audio-only formats. Preferring the video's own audio
+also avoids choosing a separate music asset over the video's spoken content.
+Explicitly silent formats are excluded. Unreadable audio produces a clear
+RuntimeError instead of leaking a raw DownloadError into the bot's unexpected-error reply.
+There are no new download retries, browser sessions, or cookie imports.
+
+Offline regression tests generate small media fixtures using ffmpeg. A fixture
+with falsely advertised AAC reproduces the original error with `bestaudio/best`;
+the new selection produces an MP3 with an audio stream. Tests also cover format
+fallbacks, audio-only posts, unreadable audio, and download rejection without retry.
+
+Run with `python -m unittest discover -s tests -v` after installing requirements.
+The three media tests require ffmpeg and ffprobe; they are skipped if unavailable.
+Validation used yt-dlp 2026.10.21 in an isolated `.venv`. No live TikTok download,
+Telegram polling, Groq request, or deployment was performed. Rebuild/redeploy the
+bot to apply the change; the deployed yt-dlp version remains unverified.
+
 - **yt-dlp breaking:** TikTok frequently changes their site. yt-dlp releases updates to keep up. If downloads start failing, update yt-dlp: bump the version in `requirements.txt` and redeploy.
 - **Groq API changes:** If Groq changes pricing, rate limits, or deprecates `whisper-large-v3`, update the model name in `transcriber.py` line 18 (`GROQ_TRANSCRIBE_URL`) and the model parameter in `_transcribe_groq()`.
 - **Telegram API changes:** `python-telegram-bot` is pinned to 21.10. Major version bumps may require code changes.
